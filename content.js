@@ -1,97 +1,102 @@
 (function () {
   'use strict';
 
-  function obterInstanciaCKEditor() {
-    const editaveis = document.querySelectorAll('.ck-editor__editable');
-    for (const el of editaveis) {
-      if (el.ckeditorInstance) {
-        return el.ckeditorInstance;
+  // Transforma a string HTML gerada pelo CKEditor 5, injetando estilos inline nas células
+  function processarHtmlTabelas(htmlString) {
+    if (!htmlString || !htmlString.includes('<table')) return htmlString;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlString, 'text/html');
+    const tabelas = doc.querySelectorAll('table');
+
+    let alterou = false;
+
+    tabelas.forEach((tabela) => {
+      const estiloTabela = (tabela.getAttribute('style') || '').toLowerCase();
+      
+      // Se o usuário definiu explicitamente a tabela sem borda, respeita
+      if (estiloTabela.includes('border-style:none') || estiloTabela.includes('border:none')) {
+        return;
       }
-    }
-    return null;
-  }
 
-  function aplicarBordasInternas() {
-    const editor = obterInstanciaCKEditor();
-
-    if (!editor) {
-      alert('Editor do SEI (CKEditor 5) não encontrado nesta tela.');
-      return;
-    }
-
-    const model = editor.model;
-    const root = model.document.getRoot();
-    const celulas = [];
-
-    const range = model.createRangeIn(root);
-    for (const item of range.getItems()) {
-      if (item.is('element', 'tableCell')) {
-        celulas.push(item);
+      // 1. Garante atributos na própria <table> para o conversor de PDF (wkhtmltopdf / Dompdf)
+      tabela.style.borderCollapse = 'collapse';
+      if (!tabela.getAttribute('border')) {
+        tabela.setAttribute('border', '1');
       }
-    }
 
-    if (celulas.length === 0) {
-      alert('Nenhuma tabela encontrada neste documento.');
-      return;
-    }
+      // Extrai estilo da tabela ou assume padrão 1px solid #000000
+      const corBorda = tabela.style.borderColor || '#000000';
+      const larguraBorda = tabela.style.borderWidth || '1px';
+      const tipoBorda =
+        tabela.style.borderStyle && tabela.style.borderStyle !== 'none'
+          ? tabela.style.borderStyle
+          : 'solid';
 
-    model.change((writer) => {
-      const selecoes = celulas.map((celula) => writer.createRangeOn(celula));
-      writer.setSelection(selecoes);
+      const bordaPadrao = `${larguraBorda} ${tipoBorda} ${corBorda}`;
 
-      const comandos = [
-        { nome: 'tableCellBorderStyle', valor: 'solid' },
-        { nome: 'tableCellBorderColor', valor: '#000000' },
-        { nome: 'tableCellBorderWidth', valor: '1px' }
-      ];
+      // Se a própria tabela não tiver border inline definido, aplica também
+      if (!tabela.style.border && !tabela.style.borderStyle) {
+        tabela.style.border = bordaPadrao;
+      }
 
-      for (const cmd of comandos) {
-        if (editor.commands.get(cmd.nome)) {
-          editor.execute(cmd.nome, { value: cmd.valor });
-        } else {
-          for (const celula of celulas) {
-            writer.setAttribute(cmd.nome, cmd.valor, celula);
-          }
+      // 2. Propaga a borda inline para todas as células (td e th)
+      const celulas = tabela.querySelectorAll('td, th');
+      celulas.forEach((celula) => {
+        const estiloCelula = (celula.getAttribute('style') || '').toLowerCase();
+        
+        // Só não aplica se a célula individual foi marcada como sem borda
+        if (estiloCelula.includes('border-style:none') || estiloCelula.includes('border:none')) {
+          return;
         }
-      }
+
+        if (!celula.style.border || celula.style.borderStyle === 'none') {
+          celula.style.border = bordaPadrao;
+        }
+      });
+
+      alterou = true;
     });
 
-    alert(`Bordas aplicadas em ${celulas.length} células. Clique em Salvar e teste o Gerar PDF.`);
+    return alterou ? doc.body.innerHTML : htmlString;
   }
 
-  function injetarBotao() {
-    if (document.getElementById('btn-sei-fix-bordas')) return;
-
-    const checkInterval = setInterval(() => {
-      const editor = obterInstanciaCKEditor();
-      if (editor) {
-        clearInterval(checkInterval);
-
-        const btn = document.createElement('button');
-        btn.id = 'btn-sei-fix-bordas';
-        btn.type = 'button';
-        btn.innerText = 'Corrigir Bordas Tabela';
-        Object.assign(btn.style, {
-          position: 'fixed',
-          top: '12px',
-          right: '20px',
-          zIndex: '99999',
-          backgroundColor: '#0056b3',
-          color: '#ffffff',
-          border: 'none',
-          borderRadius: '4px',
-          padding: '8px 14px',
-          fontSize: '13px',
-          fontWeight: 'bold',
-          cursor: 'pointer',
-          boxShadow: '0 2px 6px rgba(0,0,0,0.25)'
-        });
-
-        btn.addEventListener('click', aplicarBordasInternas);
-        document.body.appendChild(btn);
+  // Varre os textareas do formulário de edição do SEI e aplica a correção
+  function interceptarDadosFormulario() {
+    // No SEI, o conteúdo das seções do documento vai para textareas dentro do form de edição
+    const textareas = document.querySelectorAll('form textarea, textarea[name^="txa"]');
+    textareas.forEach((textarea) => {
+      if (textarea.value && textarea.value.includes('<table')) {
+        textarea.value = processarHtmlTabelas(textarea.value);
       }
-    }, 1000);
+    });
   }
 
-  injetarBotao();
+  // Sincroniza instâncias ativas do CKEditor 5 (caso o script rode no mesmo contexto ou antes do submit)
+  function instalarGatilhos() {
+    const formEditor = document.getElementById('frmEditor') || document.querySelector('form');
+    if (!formEditor) return;
+
+    // 1. Intercepta o evento submit padrão
+    formEditor.addEventListener('submit', () => {
+      // Pequeno delay síncrono ou execução na fase de bubble para garantir que o CKEditor já populou o textarea
+      interceptarDadosFormulario();
+    }, false);
+
+    // 2. No SEI, o botão Salvar muitas vezes chama o submit via JS (form.submit()), o que pula o listener 'submit'
+    // Por isso, fazemos monkey-patch no método nativo submit() deste formulário
+    const submitOriginal = formEditor.submit;
+    formEditor.submit = function () {
+      interceptarDadosFormulario();
+      return submitOriginal.apply(this, arguments);
+    };
+
+    console.log('[SEI Fix Tabelas] Monitoramento de tabelas do CKEditor 5 ativo.');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', instalarGatilhos);
+  } else {
+    instalarGatilhos();
+  }
 })();
