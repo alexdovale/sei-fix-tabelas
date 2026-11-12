@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "SEI 5 - Corretor de Bordas de Tabela",
+  "version": "1.0",
+  "description": "Aplica bordas sólidas internas nas células de tabelas do CKEditor 5 no SEI.",
+  "content_scripts": [
+    {
+      "matches": ["*://*/sei/*"],
+      "js": ["content.js"],
+      "world": "MAIN",
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
