@@ -1,15 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "SEI 5 - Corretor de Bordas de Tabela",
-  "version": "1.0",
-  "description": "Aplica bordas sólidas internas nas células de tabelas do CKEditor 5 no SEI.",
+  "name": "SEI Fix Tabelas (CKEditor 5)",
+  "version": "1.0.1",
+  "description": "Corrige o sumiço de bordas internas de tabelas ao salvar e gerar PDF no SEI 5.0.6.",
   "content_scripts": [
     {
-      "matches": ["*://*/sei/*"],
+      "matches": [
+        "*://*.sei.gov.br/*",
+        "*://*/sei/*",
+        "*://*.rj.def.br/*"
+      ],
       "js": ["content.js"],
-      "world": "MAIN",
-      "run_at": "document_idle",
-      "all_frames": true
+      "all_frames": true,
+      "run_at": "document_idle"
     }
   ]
 }
